@@ -1,17 +1,45 @@
 # Диагностика: симптом → причина → фикс
 
-## Только что обновил ноду (3.1.x / Xray v26.7.28) — и сломалось
+## Сначала — какое ядро на ноде
 
-Три ломающих изменения ядра, все проявляются сразу после апдейта и все выглядят
-как «ничего не трогал, а перестало».
+`docker exec remnanode xray version`. От ответа зависит половина диагнозов ниже:
+ноды 3.1.1–3.4.3 несут v26.7.28, 3.4.4 — v26.10.31, 3.4.5 — v26.11.9.
+
+## Обновил ноду до 3.4.4 / 3.4.5 (Xray v26.10.31 / v26.11.9) — что изменилось
+
+Переход 3.4.3 → 3.4.4 привозит сразу три месяца изменений ядра.
 
 | Симптом | Причина | Фикс |
 |---|---|---|
-| Часть юзеров разом отвалилась, у остальных всё хорошо; в логах ноды тишина | Reality-сервер с v26.7.28 по умолчанию требует `minClientVer: "26.3.27"` — клиенты на старом ядре отсекаются на хендшейке | обновить клиент (Happ/mihomo/v2rayN и т.п.). Осознанный откат: явный `minClientVer` пониже в `realitySettings` — но это снятие защиты |
-| Xray не стартует после обновления: `vless without TLS or other encryption is prohibited unless the server address is a private IP or domain` | v26.7.28 запретил VLESS/Trojan **outbound** без шифрования на публичный адрес | на этом плече включить `security: tls`/`reality` или VLESS Encryption (`xray vlessenc`). Для Trojan только TLS. Приватные адреса (`127.0.0.1`) по-прежнему разрешены |
+| Старые клиенты, отвалившиеся летом, **снова подключаются** | дефолт `minClientVer: "26.3.27"` снят в v26.9.9 — версия клиента без явного поля не проверяется | так и задумано. Нужен порог — задать `minClientVer` в `realitySettings` явно |
+| TLS-outbound ноды (мост на свой сервер с приватным/корпоративным CA) перестал проходить проверку сертификата | TLS-клиент ядра теперь доверяет **встроенному** набору RootCAs, а не системному хранилищу; часть корней из набора убрана | `tlsSettings.useSystemCA: true` на этом outbound либо `pinnedPeerCertSha256`. Reality-плечи не затронуты |
+| Xray не стартует: `maxConnections cannot be specified together with maxConcurrency` | в `xmux` заданы оба поля | оставить одно |
+| HY2-конфиг не стартует / port hopping пропал | `udpHop` вынесен из `quicParams` в UDP-маску `finalmask.udp[{type:"udphop"}]`; `brutalUp`/`brutalDown` — строки с единицами, не числа | переписать по `reference/transports.md` (раздел Hysteria) |
+| В логе warning'и про `fragment` / `noises` в Freedom, `finalRules.blockDelay`, WebSocket/gRPC/HTTPUpgrade | deprecation: `fragment`/`noises` → Finalmask, `blockDelay` → `delay`, транспорты → XHTTP | не авария. Перенести при следующей правке профиля |
+| WARP/WireGuard-outbound ведёт себя иначе с доменным `endpoint` | `domainStrategy` из WireGuard-outbound удалён, поле игнорируется | убрать поле; при необходимости задать `remoteDNS` |
+| Клиенты с `fingerprint: chrome` стали выглядеть иначе в DPI-логах | с v26.11.9 `chrome` = отпечаток Chrome 155 (касается ядра **клиента**) | ничего; если банят по fingerprint — обновлять клиентское ядро |
+| После обновления перестал работать MPTCP на входящих | v26.10.31 выключил MPTCP на listener'ах (уязвимость в Linux-ядре) | оставить выключенным; обновить ядро ОС |
+
+## Нода на 3.1.x – 3.4.3 (Xray v26.7.28) — старые грабли, ещё актуальны для неё
+
+| Симптом | Причина | Фикс |
+|---|---|---|
+| Часть юзеров разом отвалилась, у остальных всё хорошо; в логах ноды тишина | на v26.7.28 Reality-сервер по умолчанию требует `minClientVer: "26.3.27"` — клиенты на старом ядре отсекаются на хендшейке | обновить ноду до ≥ 3.4.4 (дефолт снят) или обновить клиент. Явный `minClientVer` пониже — тоже вариант |
+| Xray не стартует после обновления: `vless without TLS or other encryption is prohibited unless the server address is a private IP or domain` | с v26.7.28 запрещён VLESS/Trojan **outbound** без шифрования на публичный адрес (в v26.11.9 запрет на месте) | на этом плече включить `security: tls`/`reality` или VLESS Encryption (`xray vlessenc`). Для Trojan только TLS. Приватные адреса (`127.0.0.1`) по-прежнему разрешены |
+| То же сообщение, хотя outbound записан в упрощённой плоской форме и адрес приватный | баг проверки v26.7.28 для плоской формы, починен в v26.9.9 | обновить ноду до ≥ 3.4.4 либо переписать outbound через `vnext` |
 | Xray не стартует, ругань на `security`/`method` у VMess или Shadowsocks | в v26.7.28 выпилены «пустые» шифры: VMess `none`/`zero`, SS `none`/`plain` | сменить на настоящий шифр (`auto` у VMess, `2022-blake3-*`/`aes-256-gcm` у SS) |
-| После апдейта просела скорость на XHTTP | дефолт `xmux.maxConnections` снижен с 6 до 3 | выставить значение явно в `extra.xmux` |
-| Нода на 3.1.1 больше не падает на старте из-за geodata | так и задумано: с 3.1.1 нода докачивает недостающие гео-файлы до запуска ядра | ничего не делать; ручные костыли с предзагрузкой можно убрать |
+| После апдейта просела скорость на XHTTP | дефолт `xmux.maxConnections` снижен с 6 до 3 (действует и в v26.11.9) | выставить значение явно в `extra.xmux` |
+| Нода ≥ 3.1.1 больше не падает на старте из-за geodata | так и задумано: нода докачивает недостающие гео-файлы до запуска ядра | ничего не делать; ручные костыли с предзагрузкой можно убрать |
+
+## Панель 3.3.x – 3.4.x
+
+| Симптом | Причина | Фикс |
+|---|---|---|
+| После включения `SNI_VERIFICATION=true` на ноде панель её не видит | панель старее 3.3.0 не шлёт нужный SNI, либо на панели `SERVICE_SNI_VERIFICATION=false` | панель ≥ 3.3.0 и `SERVICE_SNI_VERIFICATION=true` (дефолт), либо выключить проверку на ноде |
+| Подписка отдаёт неверный `pbk`, клиенты ловят `processed invalid connection` | баг генерации x25519 public key в 3.4.6 | обновить панель до ≥ 3.4.7 |
+| Интеграция пишет `excludedInternalSquads` и получает 400 | поле заменено на `internalSquads: { mode, squads }` (3.4.0) | переписать вызов; `ALLOW_ONLY` требует непустой список |
+| Хост пропал из подписки у части клиентов | у хоста заполнен `includeInSrrRules` — он отдаётся только в ответах правил с этими именами | очистить поле или добавить имя нужного правила |
+| В подписке вместо серверов одна-две строки-заглушки | сработало Response Rule с `respondWithRemarks` | так задумано (напр. «обновите приложение»); проверить условия правила |
 
 ## Reality / Xray (ошибки в логах)
 
@@ -25,6 +53,7 @@
 | `non-empty "serverNames", please use "serverName"` | вставили серверные (мн.ч.) поля в клиент | на клиенте единственное число: `serverName`/`shortId` |
 | `too long "shortIds[i]"` / `invalid "shortIds[i]"` | >16 hex / нечётная длина / не-hex | `openssl rand -hex 8` |
 | `unknown "fingerprint"` / `unsafe` | опечатка/запрещённое значение | `chrome`/`firefox`/`randomized` |
+| `REALITY only supports RAW, XHTTP and gRPC for now.` | `security: reality` с другим транспортом (ws/httpupgrade/hysteria/masque/xdrive) | сменить транспорт или security |
 | `does not support TLS 1.3, REALITY handshake cannot establish` | fingerprint не даёт TLS1.3 key-share | современный fingerprint |
 | warning `Choosing apple, icloud... may get your IP blocked` | `apple`/`icloud` в serverNames | сменить target/serverNames |
 | `REALITY is based on uTLS, please set a client-fingerprint` (mihomo) | нет `client-fingerprint` при `reality-opts` | добавить `client-fingerprint: chrome` |
@@ -53,6 +82,7 @@
 | Симптом | Причина | Фикс |
 |---|---|---|
 | Reality-прокси не поднимается | нет `client-fingerprint` | добавить per-proxy; `global-client-fingerprint` мёртв с 1.19.27 |
+| TUN сломался после обновления клиента до ≥ 1.19.32 | дефолтный `stack` стал `mips` | задать `stack: mixed` (или `gvisor`/`system`) явно |
 | нет DNS / всё отваливается | DNS-петля (домен прокси через прокси) или `default-nameserver` с доменом | `default-nameserver` только IP; хост прокси → `proxy-server-nameserver` |
 | часть приложений без интернета | `fake-ip` без полного перехвата (не весь трафик в TUN) | TUN/системный прокси на весь трафик, либо в `fake-ip-filter` |
 | старт падает на geodata | GitHub недоступен из региона | `geox-url` на зеркало (jsdelivr) |

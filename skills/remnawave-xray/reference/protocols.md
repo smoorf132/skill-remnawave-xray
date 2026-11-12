@@ -1,7 +1,7 @@
 # Xray-протоколы (inbound/outbound.protocol)
 
-Что есть В Xray-core — ground truth из `infra/conf/xray.go` (таблица регистрации `protocol`).
-VLESS+Reality покрыт в `xray-reality.md`.
+Что есть В Xray-core — ground truth из `infra/conf/xray.go` (таблица регистрации `protocol`),
+сверено на теге **v26.11.9**. VLESS+Reality покрыт в `xray-reality.md`.
 
 ## Что реально в Xray-core (и чего нет)
 
@@ -10,6 +10,7 @@ VLESS+Reality покрыт в `xray-reality.md`.
 | vless, vmess, trojan, shadowsocks | ✅ | vmess/trojan/ss помечены deprecated (nudge → VLESS Encryption, но не удалят) |
 | **hysteria** (=Hysteria 2) | ✅ | `version: 2` жёстко. out с v26.1.23, in с v26.3.27. Конфиг → `transports.md` |
 | wireguard (in+out) | ✅ | для WARP/цепочек |
+| **masque** (in+out) | ✅ | IETF CONNECT-IP (RFC 9484), с сентября 2026; клиент умеет режим WARP. Свежее → `transports.md` |
 | socks, http, dokodemo-door(`tunnel`), mixed, tun | ✅ | локальные/клиентские |
 | freedom(`direct`), blackhole, dns, loopback, block | ✅ | служебные outbound |
 | **TUIC** | ❌ НЕТ | протокол sing-box, в Xray не регистрируется |
@@ -38,8 +39,11 @@ vless without TLS or other encryption is prohibited unless the server address is
 trojan without TLS is prohibited unless the server address is a private IP or domain
 ```
 
-Проверка идёт при старте, не в рантайме: конфиг просто не поднимется. Условия, при которых
-outbound остаётся законным:
+Проверка идёт при старте, не в рантайме: конфиг просто не поднимется. В v26.11.9 она на месте и
+одинаково работает для обеих форм записи VLESS-outbound — классической `settings.vnext[0]` и
+упрощённой плоской (`settings.address` / `port` / `id` / `encryption` прямо в `settings`); в
+v26.7.28 плоская форма на этой проверке спотыкалась, починено в v26.9.9 (#6741). Условия, при
+которых outbound остаётся законным:
 
 - задан `security` (`tls` / `reality`) в `streamSettings` — обычный случай, ничего делать не надо;
 - **или** у VLESS выставлен `encryption` ≠ `none` (VLESS Encryption) — для Trojan такой лазейки нет;
@@ -69,7 +73,7 @@ TLS терминирует CDN или фронт). Лечится Reality/TLS н
   Детектируемость выросла.
 - **Trojan** — `clients[].password` + `fallbacks[]` (dest/alpn/path/xver). **`flow` полностью убран** (hardfail
   если непустой — Vision поверх Trojan больше нет). Проще VLESS (пароль + fallback на реальный веб), хорош для
-  интеропа со сторонними Trojan-клиентами.
+  интеропа со сторонними Trojan-клиентами. Ядро на старте пишет warning с подсказкой «VLESS with Flow & Seed».
 - **Shadowsocks** — `method`: `2022-blake3-aes-128/256-gcm`, `2022-blake3-chacha20-poly1305`, `aes-256-gcm`,
   `chacha20-poly1305`, `xchacha20-poly1305` (**`none`/`plain` убраны в v26.7.28**). `network` tcp/udp/tcp,udp. SS-2022 мульти-юзер:
   `password` = `ServerPSK:UserPSK`. Deprecation-warning на любой метод (не удалят). obfs нет.
@@ -78,8 +82,13 @@ TLS терминирует CDN или фронт). Лечится Reality/TLS н
 
 `secretKey` (hex/base64), `address[]` (CIDR), `peers[]` (`publicKey`, `endpoint`, `allowedIPs` deflt
 `0.0.0.0/0,::0/0`, `preSharedKey`, `keepAlive`), `mtu` (1420), `reserved` (пусто или 3 байта — для Cloudflare
-WARP), `noKernelTun`, `domainStrategy` (только `forceip*`). **streamSettings НЕ поддерживается** (свой UDP-фрейминг).
+WARP), `noKernelTun`, `remoteDNS[]` (с августа 2026 — DNS, которым резолвится трафик внутри туннеля).
+**`domainStrategy` из WireGuard-outbound удалён** (сентябрь 2026, #6771) — в старых конфигах поле
+молча игнорируется, убрать. **streamSettings НЕ поддерживается** (свой UDP-фрейминг); `sockopt`
+(включая `dialerProxy` и `sendThrough`) работает. С октября 2026 WireGuard и MASQUE используют
+собственный лёгкий TCP/IP-стек ядра вместо gVisor.
 Типовое: WARP-outbound (`endpoint: engage.cloudflareclient.com:2408`) как `outboundTag` на нужные домены/хоп цепочки.
+Альтернатива с осени 2026 — MASQUE-outbound в режиме `warp` (свежее, см. `transports.md`).
 
 ## Локальные inbound (клиентский конфиг)
 
@@ -90,9 +99,15 @@ WARP), `noKernelTun`, `domainStrategy` (только `forceip*`). **streamSettin
 
 ## Freedom / Blackhole (служебные outbound)
 
-- **Freedom** (`direct`): `domainStrategy`, `redirect`, `fragment` (**`packets: "tlshello"`** — фрагментация
-  TLS ClientHello против DPI, встроенный анти-цензурный трюк), `noises[]`, `proxyProtocol`, `finalRules[]`.
-- **Blackhole**: `response.type` none/http — дроп трафика (adblock, гео-блок, kill-switch через routing).
+- **Freedom** (`direct`): `domainStrategy`, `redirect`, `proxyProtocol`, `finalRules[]` (`action`, `network`,
+  `port`, `ip`, `delay`, `logLevel`). Что поменялось к v26.11.9:
+  - `fragment` (**`packets: "tlshello"`** — фрагментация TLS ClientHello против DPI) и `noises[]`
+    **переезжают в Finalmask**: ядро пишет deprecation-warning и отсылает к
+    `streamSettings.finalmask.tcp` (`fragment`) и `finalmask.udp` (`noise`). Старая запись пока работает.
+  - `finalRules[].blockDelay` → **`delay`** (старое имя — warning); появился `logLevel`.
+  - `ipsBlocked` удалён, его роль у `finalRules`.
+- **Blackhole**: `response.type` none/http, с сентября 2026 ещё `response.customResponseData` —
+  свой ответ вместо стандартного. Дроп трафика (adblock, гео-блок, kill-switch через routing).
 
 ## TUIC / AnyTLS — не в Xray, что делать
 

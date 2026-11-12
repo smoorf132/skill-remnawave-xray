@@ -38,7 +38,7 @@ Caddy, который отдаёт настоящий сайт с настоящ
 | **Caddy — HTTPS заглушка** | **`$SELF_STEAL_PORT`** (дефолт 9443) | `127.0.0.1` | реальный сайт за Reality `dest`; TLS терминирует настоящим сертом |
 | **Caddy — catch-all** | тот же `$SELF_STEAL_PORT` | — | блок `:port { tls internal; respond 204 }` для запросов без валидного SNI |
 | RemnaNode control-API | `NODE_PORT` (env, в примерах ~2222) | `0.0.0.0` | канал панель→нода; **firewall должен пускать только IP панели** |
-| RemnaNode internal API Xray | `127.0.0.1:61000` / unix-socket | `127.0.0.1` | gRPC StatsService + авто-инбаунд `REMNAWAVE_API_INBOUND`; internal, не трогать (число «61001» — миф) |
+| RemnaNode internal API Xray | абстрактный unix-socket (`xtls-api-<rnd>`); `127.0.0.1:61000` только на старых сборках | — | gRPC StatsService + авто-инбаунд `REMNAWAVE_API_INBOUND`; internal, не трогать (число «61001» — миф) |
 
 ## Почему `dest` → localhost Caddy, а не публичный чужой сайт
 
@@ -79,7 +79,9 @@ IP и разъезжаются порты (Xray думает, что форва�
   быть локальны друг другу.
 - **Панель** может (и в проде обычно должна) стоять отдельно от ноды. Направление связи —
   **панель → нода**: панель сама подключается к `NODE_PORT` и запускает на ноде Xray с присланным
-  конфигом. Нода наружу к панели не ходит.
+  конфигом. Нода наружу к панели не ходит. С панели 3.3.0 это подключение идёт с SNI, выведенным
+  из сертификатов; на ноде 3.4.x можно включить `SNI_VERIFICATION=true`, и тогда `NODE_PORT`
+  отвечает как нода только на «свой» SNI (см. `remnawave.md`).
 - Типичная прод-модель (гайд IadjustI): 3 роли — панель / нода(ы) / selfsteal-заглушка, где
   заглушка живёт на той же VPS, что и нода.
 
@@ -89,7 +91,7 @@ IP и разъезжаются порты (Xray думает, что форва�
 |---|---|---|
 | `SELF_STEAL_DOMAIN` | твой домен-заглушка (DNS-only!) | Caddyfile site-блок + Xray `serverNames` |
 | `SELF_STEAL_PORT` | локальный HTTPS-порт Caddy | Caddyfile `https_port` + Xray `dest` |
-| `CADDY_VERSION` | пин версии образа | docker-compose (дефолт 2.11.4) |
+| `CADDY_VERSION` | пин версии образа | docker-compose (в selfsteal.sh дефолт всё ещё 2.11.4 — ставить 2.11.9) |
 | `HTML_DIR` | папка со статикой сайта | volume Caddy → `/var/www/html` |
 
 Смежное: конкретный Caddyfile → `caddy-selfsteal.md`; Reality-параметры → `xray-reality.md`;

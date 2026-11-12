@@ -53,6 +53,10 @@ python validate.py <config.json> Caddyfile    # + кросс-чек target↔п�
 
 Проверяет пункты 1–8 из чек-листа: порт 443, security×network, flow только на raw, ключи 32 байта,
 shortIds (hex/чётность/≤16), serverNames (apple/icloud), xver 0/1/2, allowInsecure, согласование с Caddy.
+Плюс проверки под ядро v26.11.9: имя транспорта читается и из `method`, и из `network`; удалённые
+транспорты (`h2`/`quic`); `xmux.maxConnections` вместе с `maxConcurrency`; незашифрованный
+VLESS/Trojan-outbound наружу в обеих формах записи; числовые `brutalUp`/`brutalDown` и `udpHop`
+внутри `quicParams`; deprecated-поля (`fragment`/`noises` во Freedom, `domainStrategy` у WireGuard).
 Плейсхолдеры `<...>` не считает ошибкой. Код выхода 1 при ошибках. Ручной чек-лист — ниже, как справка.
 
 ## Чек-лист согласованности (нарушишь — не работает)
@@ -64,10 +68,13 @@ shortIds (hex/чётность/≤16), serverNames (apple/icloud), xver 0/1/2, a
 3. **Ключи — пара**: `password`/pbk (клиент) = `xray x25519 -i "<privateKey сервера>"`. Разные ключи → `processed
    invalid connection`.
 4. **shortId** клиента ∈ `shortIds` сервера (или обе `""`). Длина чётная, ≤16 hex.
-5. **flow совпадает**: `xtls-rprx-vision` на inbound-clients и outbound-users, только `network: raw`.
+5. **flow совпадает**: `xtls-rprx-vision` на inbound-clients и outbound-users, только `network: raw`
+   (в новых конфигах поле может называться `method` — это то же самое).
 6. **fingerprint задан на клиенте** (`client-fingerprint` в mihomo / `fingerprint` в xray-outbound). Reality без него не встанет.
 7. **xver ↔ proxy_protocol**: `xver: 1` → Caddy `listener_wrappers.proxy_protocol`; `xver: 0` → без враппера.
 8. **Порт 443** для боевого inbound (не-443 → warning ядра + бан).
+9. **`minClientVer` — осознанно.** На ядре v26.7.28 незаданное поле = `26.3.27`, на v26.9.9+ = без проверки.
+   Генерируешь профиль под смешанный парк нод — задавай явно или не рассчитывай на дефолт.
 
 ## Мини-рецепты
 

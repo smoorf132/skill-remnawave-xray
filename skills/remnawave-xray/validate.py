@@ -8,6 +8,10 @@ validate.py — проверка согласованности конфигов
 serverNames/shortIds, xver <-> proxy_protocol, apple/icloud, allowInsecure,
 незашифрованные VLESS/Trojan outbound наружу (запрещены ядром с v26.7.28).
 
+Сверено с ядром Xray v26.11.9: имя транспорта берётся из `method` или `network`,
+ловятся удалённые транспорты, xmux maxConnections+maxConcurrency, числовые
+brutalUp/brutalDown и udpHop внутри quicParams, deprecated-поля Freedom/WireGuard.
+
 Использование:
     python validate.py <xray-config.json> [Caddyfile]
 
@@ -28,6 +32,20 @@ def note(m): NOTES.append(m)
 PLACEHOLDER = re.compile(r"^\s*<[^>]+>\s*$")
 HEX = re.compile(r"^[0-9a-fA-F]*$")
 LOCALHOST = {"127.0.0.1", "localhost", "::1", ""}
+
+# Имена транспортов, как их принимает ядро (infra/conf/transport_internet.go, v26.11.9)
+TRANSPORT_ALIASES = {
+    "raw": "raw", "tcp": "raw",
+    "xhttp": "xhttp", "splithttp": "xhttp",
+    "mkcp": "mkcp", "kcp": "mkcp",
+    "grpc": "grpc",
+    "ws": "websocket", "websocket": "websocket",
+    "httpupgrade": "httpupgrade",
+    "hysteria": "hysteria",
+    "masque": "masque",
+    "xdrive": "xdrive",
+}
+REMOVED_TRANSPORTS = {"h2", "h3", "http", "quic"}
 
 
 def is_placeholder(v):
@@ -70,6 +88,105 @@ def port_int(tok):
     return None
 
 
+def transport_of(ss):
+    """Транспорт из streamSettings: канон `method`, алиас `network`.
+
+    Возвращает (нормализованное имя | None, сырое значение). Пустое значение ядро
+    трактует как raw.
+    """
+    raw = ss.get("method", ss.get("network"))
+    if raw is None or raw == "":
+        return ("raw", raw)
+    key = str(raw).strip().lower()
+    return (TRANSPORT_ALIASES.get(key), raw)
+
+
+def upper_bound(v):
+    """Верхняя граница диапазона ядра: 3 | "3" | "16-32" -> int (0 если не разобрать)."""
+    if isinstance(v, bool):
+        return 0
+    if isinstance(v, (int, float)):
+        return int(v)
+    if isinstance(v, str):
+        tail = v.strip().rpartition("-")[2]
+        return int(tail) if tail.isdigit() else 0
+    if isinstance(v, dict):
+        return upper_bound(v.get("to", 0))
+    return 0
+
+
+def check_stream(tag, ss):
+    """Проверки streamSettings, общие для inbound и outbound."""
+    if not isinstance(ss, dict):
+        return
+    name, raw = transport_of(ss)
+    if raw is not None and str(raw).strip().lower() in REMOVED_TRANSPORTS:
+        err(f"[{tag}] транспорт {raw!r} удалён из ядра — конфиг не стартует "
+            f"(замена: xhttp stream-one)")
+    elif name is None:
+        err(f"[{tag}] неизвестный транспорт {raw!r} (ядро: unknown transport protocol)")
+    elif name in ("websocket", "httpupgrade", "grpc"):
+        note(f"[{tag}] транспорт {name} — ядро пишет deprecation-warning (не удаляют), "
+             f"рекомендуемая замена XHTTP")
+
+    if "method" in ss and "network" in ss and ss["method"] != ss["network"]:
+        warn(f"[{tag}] заданы и method={ss['method']!r}, и network={ss['network']!r} — "
+             f"ядро возьмёт method")
+
+    # xmux: maxConnections и maxConcurrency вместе запрещены
+    xh = ss.get("xhttpSettings") or ss.get("splithttpSettings") or {}
+    for holder in (xh, xh.get("extra") or {}):
+        xmux = holder.get("xmux") if isinstance(holder, dict) else None
+        if isinstance(xmux, dict):
+            if upper_bound(xmux.get("maxConnections")) > 0 and \
+               upper_bound(xmux.get("maxConcurrency")) > 0:
+                err(f"[{tag}] xmux: maxConnections и maxConcurrency заданы вместе — ядро не "
+                    f"стартует (\"maxConnections cannot be specified together with "
+                    f"maxConcurrency\")")
+
+    # finalmask.quicParams
+    qp = (ss.get("finalmask") or {}).get("quicParams") or {}
+    for k in ("brutalUp", "brutalDown"):
+        if isinstance(qp.get(k), (int, float)) and not isinstance(qp.get(k), bool):
+            err(f"[{tag}] quicParams.{k}={qp[k]!r} — нужна строка с единицами "
+                f"(\"100mbps\"), число ядро v26.11.9 не разберёт")
+    if "udpHop" in qp or "udphop" in qp:
+        warn(f"[{tag}] quicParams.udpHop — с v26.9.9 port hopping задаётся UDP-маской "
+             f"finalmask.udp[{{type: \"udphop\"}}], ключ в quicParams игнорируется")
+    hy = ss.get("hysteriaSettings") or {}
+    for k in ("up", "down", "udphop", "congestion"):
+        if k in hy:
+            warn(f"[{tag}] hysteriaSettings.{k} — поля больше нет (v26.11.9), "
+                 f"параметры QUIC живут в finalmask.quicParams / finalmask.udp")
+
+    # security x transport
+    if str(ss.get("security") or "").lower() == "reality" and name not in (None, "raw", "xhttp", "grpc"):
+        err(f"[{tag}] security=reality несовместим с транспортом {raw!r} "
+            f"(\"REALITY only supports RAW, XHTTP and gRPC for now.\")")
+
+
+def check_deprecated_outbound(ob):
+    """Поля, которые ядро v26.11.9 помечает устаревшими или молча игнорирует."""
+    tag = ob.get("tag", "<no-tag>")
+    proto = ob.get("protocol")
+    settings = ob.get("settings", {}) or {}
+    if proto in ("freedom", "direct"):
+        if "fragment" in settings:
+            warn(f"[{tag}] freedom.fragment — deprecated, переносить в "
+                 f"streamSettings.finalmask.tcp (type: fragment)")
+        if "noises" in settings or "noise" in settings:
+            warn(f"[{tag}] freedom.noises — deprecated, переносить в "
+                 f"streamSettings.finalmask.udp (type: noise)")
+        if "ipsBlocked" in settings:
+            warn(f"[{tag}] freedom.ipsBlocked удалён — использовать finalRules")
+        for rule in settings.get("finalRules") or []:
+            if isinstance(rule, dict) and "blockDelay" in rule:
+                warn(f"[{tag}] finalRules.blockDelay переименован в delay")
+    if proto == "wireguard" and "domainStrategy" in settings:
+        warn(f"[{tag}] wireguard.domainStrategy удалён из ядра (сентябрь 2026) — "
+             f"поле игнорируется, убрать (для резолва внутри туннеля есть remoteDNS)")
+
+
 def is_private_host(host):
     """Приватный ли адрес по меркам ядра (приватный IP или локальный домен).
 
@@ -106,7 +223,12 @@ def check_outbound_encryption(ob):
         return
 
     settings = ob.get("settings", {}) or {}
-    peers = settings.get("vnext") or settings.get("servers") or []
+    if settings.get("address") is not None:
+        # упрощённая плоская форма: address/port/id/encryption прямо в settings
+        peers = [{"address": settings.get("address"),
+                  "users": [{"encryption": settings.get("encryption")}]}]
+    else:
+        peers = settings.get("vnext") or settings.get("servers") or []
     for peer in peers:
         if not isinstance(peer, dict):
             continue
@@ -144,17 +266,17 @@ def check_reality_inbound(ib):
         else:
             note(f"[{tag}] порт {port} на {listen} — ок для CDN-инбаунда за реверс-прокси")
 
-    # 2. security x network
-    network = ss.get("network")
+    # 2. security x transport (поле method, алиас network; tcp == raw)
+    network, raw_network = transport_of(ss)
     if network not in ("raw", "xhttp", "grpc"):
-        err(f"[{tag}] security=reality несовместим с network={network!r} "
+        err(f"[{tag}] security=reality несовместим с транспортом {raw_network!r} "
             f"(только raw/xhttp/grpc)")
 
     # 3. flow только xtls-rprx-vision и только на raw
     for cl in ib.get("settings", {}).get("clients", []) or []:
         flow = cl.get("flow", "")
         if flow == "xtls-rprx-vision" and network != "raw":
-            err(f"[{tag}] flow=xtls-rprx-vision требует network=raw (сейчас {network!r})")
+            err(f"[{tag}] flow=xtls-rprx-vision требует транспорт raw (сейчас {raw_network!r})")
         elif flow and flow != "xtls-rprx-vision":
             warn(f"[{tag}] flow={flow!r} — legacy XTLS-flow мертвы, только xtls-rprx-vision")
 
@@ -212,6 +334,16 @@ def check_reality_inbound(ib):
     # 8. show
     if rs.get("show") is True:
         warn(f"[{tag}] show=true — в проде должно быть false")
+
+    # 9. minClientVer: дефолт зависит от версии ядра
+    mcv = rs.get("minClientVer")
+    if not mcv:
+        note(f"[{tag}] minClientVer не задан: ядро v26.7.28 (ноды 3.1.1–3.4.3) подставит "
+             f"26.3.27 и отсечёт старые клиенты, v26.9.9+ (нода >= 3.4.4) версию не проверяет")
+    elif not is_placeholder(mcv):
+        parts = str(mcv).split(".")
+        if len(parts) > 3 or not all(x.isdigit() and int(x) < 256 for x in parts):
+            err(f"[{tag}] minClientVer={mcv!r} — формат x.y.z, каждый компонент 0-255")
 
     # target
     target = rs.get("target", rs.get("dest"))
@@ -286,8 +418,18 @@ def main():
 
     realities = [check_reality_inbound(ib) for ib in reality_inbounds]
 
+    for ib in cfg.get("inbounds", []) or []:
+        if ib not in reality_inbounds:      # у Reality-инбаундов транспорт уже проверен
+            check_stream(ib.get("tag", "<no-tag>"), ib.get("streamSettings"))
+        else:
+            ss = dict(ib.get("streamSettings") or {})
+            ss.pop("security", None)        # не дублировать ошибку security x transport
+            check_stream(ib.get("tag", "<no-tag>"), ss)
+
     for ob in cfg.get("outbounds", []) or []:
         check_outbound_encryption(ob)
+        check_deprecated_outbound(ob)
+        check_stream(ob.get("tag", "<no-tag>"), ob.get("streamSettings"))
 
     caddy = None
     if len(sys.argv) >= 3:

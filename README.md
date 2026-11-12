@@ -5,6 +5,8 @@
 > **Claude Code / agent skill** для стека **Remnawave + Xray (Reality/Vision) + Caddy selfsteal + mihomo**.
 > Справочник по стеку, генератор конфигов и диагностика «симптом → причина → фикс» — из официальной документации и исходников.
 >
+> Форк [Case211/skill-remnawave-xray](https://github.com/Case211/skill-remnawave-xray): содержимое пересверено и обновлено под Panel 3.4.10 / Node 3.4.5 / Xray v26.11.9 / Caddy 2.11.9 / mihomo 1.19.34 (2026-11-12).
+>
 > *An agent skill for the Remnawave VPN stack: Xray VLESS+Reality+XTLS-Vision, Caddy selfsteal masking, and mihomo (Clash.Meta) clients — reference, config generation, and diagnostics.*
 
 ## Что это
@@ -44,12 +46,12 @@ tools/
 **Claude Code — через marketplace:**
 
 ```
-/plugin marketplace add Case211/skill-remnawave-xray
-/plugin install remnawave-xray@case211
+/plugin marketplace add smoorf132/skill-remnawave-xray
+/plugin install remnawave-xray@smoorf132
 /reload-plugins
 ```
 
-Или через UI: `/plugin` → таб **Marketplaces** → добавить `Case211/skill-remnawave-xray`, затем в **Discover** установить `remnawave-xray`.
+Или через UI: `/plugin` → таб **Marketplaces** → добавить `smoorf132/skill-remnawave-xray`, затем в **Discover** установить `remnawave-xray`.
 
 **Вручную** (без marketplace): скопировать папку `skills/remnawave-xray/` в каталог скиллов —
 `~/.claude/skills/` (Windows: `%USERPROFILE%\.claude\skills\`) или `<project>/.claude/skills/`.
@@ -82,11 +84,11 @@ tools/
 
 | Компонент | Версия |
 |---|---|
-| Remnawave panel | 3.2.3 |
-| Remnawave node | 3.1.1 |
-| Xray-core | v26.7.28 (CalVer) |
-| Caddy | 2.11.4 |
-| mihomo (Clash.Meta) | 1.19.29 |
+| Remnawave panel | 3.4.10 |
+| Remnawave node | 3.4.5 |
+| Xray-core | v26.11.9 (CalVer) |
+| Caddy | 2.11.9 |
+| mihomo (Clash.Meta) | 1.19.34 |
 
 ## Источники
 

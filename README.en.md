@@ -4,6 +4,8 @@
 
 > **Claude Code / agent skill** for the **Remnawave + Xray (Reality/Vision) + Caddy selfsteal + mihomo** stack.
 > Stack reference, config generator, and symptom → cause → fix diagnostics — sourced from official docs and source code, not blog posts.
+>
+> Fork of [Case211/skill-remnawave-xray](https://github.com/Case211/skill-remnawave-xray): re-verified and updated for Panel 3.4.10 / Node 3.4.5 / Xray v26.11.9 / Caddy 2.11.9 / mihomo 1.19.34 (2026-11-12).
 
 ## What it is
 
@@ -42,12 +44,12 @@ tools/
 **Claude Code — via marketplace:**
 
 ```
-/plugin marketplace add Case211/skill-remnawave-xray
-/plugin install remnawave-xray@case211
+/plugin marketplace add smoorf132/skill-remnawave-xray
+/plugin install remnawave-xray@smoorf132
 /reload-plugins
 ```
 
-Or through the UI: `/plugin` → **Marketplaces** tab → add `Case211/skill-remnawave-xray`, then install `remnawave-xray` from **Discover**.
+Or through the UI: `/plugin` → **Marketplaces** tab → add `smoorf132/skill-remnawave-xray`, then install `remnawave-xray` from **Discover**.
 
 **Manually** (without the marketplace): copy the `skills/remnawave-xray/` folder into your skills directory —
 `~/.claude/skills/` (Windows: `%USERPROFILE%\.claude\skills\`) or `<project>/.claude/skills/`.
@@ -88,11 +90,11 @@ Current as of the build date — verify before deploying:
 
 | Component | Version |
 |---|---|
-| Remnawave panel | 3.2.3 |
-| Remnawave node | 3.1.1 |
-| Xray-core | v26.7.28 (CalVer) |
-| Caddy | 2.11.4 |
-| mihomo (Clash.Meta) | 1.19.29 |
+| Remnawave panel | 3.4.10 |
+| Remnawave node | 3.4.5 |
+| Xray-core | v26.11.9 (CalVer) |
+| Caddy | 2.11.9 |
+| mihomo (Clash.Meta) | 1.19.34 |
 
 How to check what is current:
 

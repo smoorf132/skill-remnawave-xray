@@ -12,4 +12,4 @@
 - Генерация — `skills/remnawave-xray/generators.md` · Диагностика — `skills/remnawave-xray/diagnostics.md` · Примеры — `skills/remnawave-xray/examples/`
 
 Инварианты: порт 443; `target` → localhost Caddy, `serverNames == домен` (DNS-only, не Cloudflare); flow только
-`xtls-rprx-vision` (raw); `client-fingerprint` обязателен; `network: "raw"` (не tcp). Версии: Remnawave panel 3.2.3 · node 3.1.1 · Xray-core v26.7.28 · Caddy 2.11.4 · mihomo 1.19.29.
+`xtls-rprx-vision` (raw); `client-fingerprint` обязателен; `network: "raw"` (не tcp). Версии: Remnawave panel 3.4.10 · node 3.4.5 · Xray-core v26.11.9 · Caddy 2.11.9 · mihomo 1.19.34.

@@ -17,10 +17,21 @@
 | `protocol` | из sniffing: `http` / `tls` / `quic` / `bittorrent` |
 | `inboundTag` / `outboundTag` | привязка к тегам инбаунда/аутбаунда |
 | `source` / `user` / `attrs` | IP источника / email юзера / атрибуты HTTP |
+| `process` / `localOS` | имя процесса (клиент) / ОС, на которой крутится ядро — `localOS` матчит `runtime.GOOS` (`linux`, `windows`, `android`, `darwin`…), с августа 2026 |
 
 `domainStrategy` (в блоке `routing`): `AsIs` (только домены, без резолва), `IPIfNonMatch` (не сматчил
 доменом — резолвит и пробует по IP), `IPOnDemand` (резолвит сразу). Для сплит-туннеля обычно
 `IPIfNonMatch`. `queryStrategy` в DNS — `UseIP` / `UseIPv4` / `UseIPv6`.
+
+### Lua-скрипт вместо правил (`routing.script`, `dns.script`) — **НЕТОЧНО, свежее**
+
+С v26.10.10 (в живых релизах — v26.10.21+) решение о маршруте и DNS можно отдать Lua-скрипту.
+Жёсткие ограничения из ядра: `routing.script` **нельзя совмещать** с `domainStrategy` и `rules`
+(`routing script cannot be used with domainStrategy or rules`); `dns.script` — с `disableFallback`,
+`enableParallelQuery` и пер-серверными `domains`/`skipFallback`/`finalQuery`. Скрипт исполняется в
+песочнице (белый список функций), inline-скрипты отключены — только файл. Нода Remnawave уважает
+`script` начиная с **3.4.5** (раньше затирала). Для обычного сплит-туннеля правила проще и
+предсказуемее; скрипт — для нетривиальной логики.
 
 ### Префиксы доменных матчеров
 
@@ -80,6 +91,10 @@ Cloudflare WARP даёт бесплатный резидентный-ish вых�
     "mtu": 1280 } }
 ```
 
+`domainStrategy` в WireGuard-outbound **больше нет** (удалён в сентябре 2026) — из старых конфигов
+убрать; для резолва внутри туннеля есть `remoteDNS[]`. Альтернатива WireGuard'у с осени 2026 —
+MASQUE-outbound в режиме `warp` (свежее, см. `reference/transports.md`).
+
 **Цепочка «через основной прокси, потом WARP»** (WARP видит не IP клиента, а IP выходной ноды) —
 `dialerProxy` на streamSettings WARP-аутбаунда указывает на тег основного прокси-аутбаунда:
 
@@ -111,7 +126,11 @@ Cloudflare WARP даёт бесплатный резидентный-ish вых�
   по своему расписанию. Самодельные предзагрузчики можно выбрасывать.
 - **Panel 3.2.3: `geodata` и `dns` разрешены в сниппетах** — общий блок гео/DNS выносится один раз
   и переиспользуется профилями, с опциональным перезапуском затронутых нод после правки.
-- Источники: `Loyalsoldier/v2ray-rules-dat`, `runetfreedom/russia-*` (РФ-специфика). RU-`geoip` дрейфует
+- **Ядро v26.10.31+ ограничивает автообновление geodata:** размер скачиваемого, расширения файлов и
+  частоту; для ссылок на `XTLS/Xray-rules-dat` качается сжатый `.dat.gz` (v26.11.9). Официальные
+  сборки Xray с v26.10.21 комплектуются гео-файлами из `XTLS/Xray-rules-dat`. Блок в конфиге:
+  `geodata: { cron, outbound, assets: [{ url, file }] }`.
+- Источники: `XTLS/Xray-rules-dat` (официальный), `Loyalsoldier/v2ray-rules-dat`, `runetfreedom/russia-*` (РФ-специфика). RU-`geoip` дрейфует
   (новые ASN), поэтому для РФ надёжнее доменные правила + периодически обновляемые CIDR-листы.
 
 ## Грабли

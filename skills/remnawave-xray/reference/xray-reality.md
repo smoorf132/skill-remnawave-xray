@@ -1,9 +1,9 @@
 # Xray-core: VLESS + Reality + XTLS-Vision
 
-Xray-core **v26.7.28** (CalVer `vYY.M.D`; это ядро внутри Remnawave Node 3.1.1). Имена полей и
-валидация сверены с официальной докой `xtls.github.io` (en/ru/zh совпадают) и исходниками
-`infra/conf/` — с v26.7.28 разбор транспортов разнесён по `transport_method.go`,
-`transport_security.go`, `transport_finalmask.go`, `transport_sockopt.go`.
+Xray-core **v26.11.9** (CalVer `vYY.M.D`; это ядро внутри Remnawave Node 3.4.5; ноды 3.1.1–3.4.3
+несут v26.7.28, 3.4.4 — v26.10.31). Имена полей и валидация сверены с исходниками `infra/conf/`
+на теге v26.11.9 (`transport_internet.go`, `transport_method.go`, `transport_security.go`,
+`transport_finalmask.go`, `transport_sockopt.go`) и официальной докой `xtls.github.io`.
 Один struct обслуживает inbound и outbound — роль определяется наличием `target`/`dest`.
 
 Полный дамп офиц. доки для точечной сверки: https://xtls.github.io/llms-full.txt (642 КБ, first-party).
@@ -22,6 +22,10 @@ Xray-core **v26.7.28** (CalVer `vYY.M.D`; это ядро внутри Remnawave
 - **Post-quantum (опц., обратно совместимо):** `mldsa65Seed`/`mldsa65Verify` (ML-DSA-65 подпись; **условие:
   сертификат `target` должен быть > 3500 байт**), гибридный обмен ключами X25519MLKEM768 (uTLS «как Chrome»).
 - Ядро выдаёт warning на `apple`/`icloud` в `serverNames` и на не-443 порт (по опыту RPRX — «легко ведёт к бану IP»).
+- **Дефолтный `minClientVer` — уже история.** Гайды лета 2026 пишут «после обновления ноды старые
+  клиенты отвалятся» — это верно только для ядра v26.7.28. В v26.9.9+ дефолт снят (см. таблицу inbound).
+- **MPTCP на listener'ах выключен по умолчанию** (v26.10.31, из-за удалённой уязвимости в MPTCP
+  Linux-ядра). Вернуть можно только явным `sockopt.tcpMptcp: true` — и незачем.
 
 ## Матрица `security` x `network` (жёсткое ограничение, проверять при валидации)
 
@@ -29,6 +33,9 @@ Xray-core **v26.7.28** (CalVer `vYY.M.D`; это ядро внутри Remnawave
 |---|---|
 | `reality` | **только** `raw`, `xhttp`, `grpc` |
 | `tls` | все (`raw`, `xhttp`, `mkcp`, `grpc`, `websocket`, `httpupgrade`, `hysteria`) |
+
+Ограничение Reality зашито в ядре дословно: `REALITY only supports RAW, XHTTP and gRPC for now.`
+Новые транспорты `masque` и `xdrive` (осень 2026, см. `transports.md`) с Reality не работают.
 
 `flow: xtls-rprx-vision` — **только `raw`**. Reality поверх XHTTP/gRPC -> `flow` НЕ указывать.
 
@@ -41,7 +48,7 @@ Xray-core **v26.7.28** (CalVer `vYY.M.D`; это ядро внутри Remnawave
 | `privateKey` | да | x25519 (`xray x25519`), base64 RawURLEncoding, ровно 32 байта. Хранится внутри Config Profile панели, наружу не уходит. |
 | `shortIds` | да | список hex <=16 симв, **чётной длины**; `""` допустим. |
 | `xver` | нет | PROXY-protocol на форвард к target: **0/1/2**. selfsteal обычно 1. |
-| `minClientVer` / `maxClientVer` | нет | `"x.y.z"`, каждый компонент 0-255. ⚠️ **С v26.7.28 у сервера дефолт `minClientVer: "26.3.27"`** — клиенты на ядре старее молча не подключатся. Обновление ноды до 3.1.1 отрезает старые сборки клиентов; ослаблять — только явным значением и осознанно. |
+| `minClientVer` / `maxClientVer` | нет | `"x.y.z"`, каждый компонент 0-255. **Дефолта нет** (v26.9.9+): не задал — версия клиента не проверяется. ⚠️ Только в v26.7.28 (ноды 3.1.1–3.4.3) сервер сам подставлял `minClientVer: "26.3.27"` и молча не пускал клиентов на ядре старее; с ноды 3.4.4 это поведение исчезло. Нужен порог — писать явно. |
 | `maxTimeDiff` | нет | допустимый разброс часов, мс (обычно 0 или ~60000). |
 | `mldsa65Seed` | нет, only server | seed ML-DSA-65 (`xray mldsa65`), 32 байта, != privateKey. **Нужен cert target > 3500 байт.** |
 | `limitFallbackUpload` / `limitFallbackDownload` | нет | `{afterBytes, bytesPerSec, burstBytesPerSec}` — троттлинг непрошедших авторизацию. Офиц. предупреждение: сам лимит — тоже отпечаток. |
@@ -66,6 +73,12 @@ Xray-core **v26.7.28** (CalVer `vYY.M.D`; это ядро внутри Remnawave
 ### `fingerprint`
 
 `chrome` `firefox` `safari` `ios` `android` `edge` `360` `qq` `random` `randomized` `randomizednoalpn`.
+- Пусто или `chrome` = `HelloChrome_Auto`. **С v26.11.9 это отпечаток Chrome 155** (ядро перешло на
+  обновлённый uTLS; по заметке к релизу — «пока не таргетится ТСПУ»). Клиенты на старом ядре под тем
+  же словом `chrome` шлют более старый ClientHello — при блокировках «по fingerprint» первым делом
+  обновлять ядро клиента, а не перебирать значения.
+- Точечные версии: `hellochrome_155`, `hellochrome_133`, `hellochrome_131`, `hellofirefox_148`,
+  `hellosafari_26_3` и др. — из них же при старте выбирается `random`.
 - `random` — выбирает готовый из пула; `randomized` — генерирует новый каждый раз (совместим с Vision).
 - Анекдот сообщества: статичный `chrome` на shared-ноде иногда ловит ISP-шейпинг по fingerprint -> `randomized` спасает.
 
@@ -120,6 +133,15 @@ Selfsteal inbound (суть):
       "shortIds": [""], "privateKey": "<REALITY_PRIVATE_KEY>", "serverNames": ["<DE_NODE_DOMAIN>"] } } }
 ```
 `clients: []` в inbound — норма: Remnawave инжектит реальных юзеров динамически (см. `remnawave.md`).
+
+## TLS-клиент: встроенные корневые сертификаты (не Reality, но бьёт по TLS-outbound'ам)
+
+С октября 2026 (в живых релизах — начиная с v26.10.21) TLS-клиент ядра по умолчанию проверяет сервер по **встроенному** набору RootCAs, а не
+по системному хранилищу (защита от подсаженного в ОС CA); из набора заодно убраны
+скомпрометированные корни. Следствие: outbound с `security: tls` на сервер с сертификатом от
+приватного/корпоративного CA, который раньше проходил «потому что CA лежит в системе», после
+обновления падает на проверке цепочки. Лечится `tlsSettings.useSystemCA: true` на этом outbound
+либо пиннингом (`pinnedPeerCertSha256`). На Reality-плечи и на ACME-серты Caddy не влияет.
 
 ## Команды
 
